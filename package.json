@@ -20,6 +20,9 @@
   "homepage": "https://github.com/FaryzK/medical-transcriber#readme",
   "description": "",
   "dependencies": {
+    "@google-cloud/speech": "^7.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "nodemon": "^3.1.9"
   }
