@@ -1,5 +1,6 @@
-import { Document, Packer, Paragraph, TextRun } from 'docx';
+import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, BorderStyle } from 'docx';
 import { TranslationServiceClient } from '@google-cloud/translate';
+import openaiService from './openai.service.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -163,6 +164,13 @@ class DocumentService {
           'English Transcription'
         );
         files.push(englishFile);
+
+        // Generate context analysis document for English transcriptions
+        const analysisFile = await this.generateContextAnalysisDocument(
+          text,
+          'Context Analysis'
+        );
+        files.push(analysisFile);
       }
 
       return files;
@@ -184,6 +192,104 @@ class DocumentService {
       }
     } catch (error) {
       console.error('Error cleaning up file:', error);
+    }
+  }
+
+  async generateContextAnalysisDocument(text, title) {
+    try {
+      const analysis = await openaiService.analyzeTranscription(text);
+      
+      const doc = new Document({
+        sections: [{
+          properties: {},
+          children: [
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: title,
+                  bold: true,
+                  size: 32
+                })
+              ]
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: new Date().toLocaleString(),
+                  size: 24,
+                  italic: true
+                })
+              ]
+            }),
+            new Paragraph({}), // Empty paragraph for spacing
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "Instructions:",
+                  bold: true,
+                  size: 28
+                })
+              ]
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "Please fill in the missing context information between the dash (-) and closing bracket (]) in each [NEEDS_CONTEXT] section.",
+                  size: 24
+                })
+              ]
+            }),
+            new Paragraph({}), // Empty paragraph for spacing
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: "Transcription with Context Markers:",
+                  bold: true,
+                  size: 28
+                })
+              ]
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: analysis.annotatedText,
+                  size: 24
+                })
+              ]
+            })
+          ]
+        }]
+      });
+
+      // Create documents directory if it doesn't exist
+      const docsDir = path.join(__dirname, '../documents');
+      if (!fs.existsSync(docsDir)) {
+        fs.mkdirSync(docsDir, { recursive: true });
+      }
+
+      const now = new Date();
+      const date = now.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      }).replace(/\//g, '-');
+      
+      const time = now.toLocaleTimeString('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).replace(':', '');
+
+      const filename = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${date}_${time}.docx`;
+      const filepath = path.join(docsDir, filename);
+
+      const buffer = await Packer.toBuffer(doc);
+      fs.writeFileSync(filepath, buffer);
+
+      return filepath;
+    } catch (error) {
+      console.error('Error generating context analysis document:', error);
+      throw error;
     }
   }
 }

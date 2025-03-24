@@ -9,6 +9,7 @@ export default function FileTranscription() {
   const [showConfidence, setShowConfidence] = useState(false);
   const fileInputRef = useRef(null);
   const [generatedFiles, setGeneratedFiles] = useState([]);
+  const [isGeneratingDocuments, setIsGeneratingDocuments] = useState(false);
 
   const handleFileChange = (event) => {
     const selectedFile = event.target.files[0];
@@ -121,6 +122,7 @@ export default function FileTranscription() {
     if (!transcriptionResults) return;
 
     try {
+      setIsGeneratingDocuments(true);
       const combinedText = getCombinedTranscription();
       const response = await fetch('/api/generate-documents', {
         method: 'POST',
@@ -142,6 +144,8 @@ export default function FileTranscription() {
     } catch (error) {
       console.error('Error generating documents:', error);
       alert('Failed to generate documents: ' + error.message);
+    } finally {
+      setIsGeneratingDocuments(false);
     }
   };
 
@@ -256,14 +260,14 @@ export default function FileTranscription() {
           <button
             type="button"
             onClick={handleGenerateDocuments}
-            disabled={!transcriptionResults.length || isProcessing}
+            disabled={!transcriptionResults.length || isProcessing || isGeneratingDocuments}
             className={`px-4 py-2 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-              !transcriptionResults.length || isProcessing
+              !transcriptionResults.length || isProcessing || isGeneratingDocuments
                 ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
                 : 'bg-green-600 text-white hover:bg-green-700'
             } focus:ring-green-500`}
           >
-            Generate Documents
+            {isGeneratingDocuments ? 'Generating...' : 'Generate Documents'}
           </button>
         </div>
       </form>

@@ -13,6 +13,7 @@ export default function RealTimeTranscription() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [generatedFiles, setGeneratedFiles] = useState([]);
+  const [isGeneratingDocuments, setIsGeneratingDocuments] = useState(false);
   
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -349,13 +350,10 @@ export default function RealTimeTranscription() {
   };
   
   const handleGenerateDocuments = async () => {
-    if (!transcription) {
-      setError('No transcription available to generate documents');
-      return;
-    }
+    if (!transcription) return;
 
     try {
-      addDebug('Generating documents...');
+      setIsGeneratingDocuments(true);
       const response = await fetch('/api/generate-documents', {
         method: 'POST',
         headers: {
@@ -368,17 +366,16 @@ export default function RealTimeTranscription() {
       });
 
       const data = await response.json();
-
       if (!data.success) {
         throw new Error(data.error || 'Failed to generate documents');
       }
 
       setGeneratedFiles(data.files);
-      addDebug('Documents generated and download initiated');
     } catch (error) {
       console.error('Error generating documents:', error);
-      addDebug(`Document generation error: ${error.message}`);
-      setError(`Failed to generate documents: ${error.message}`);
+      alert('Failed to generate documents: ' + error.message);
+    } finally {
+      setIsGeneratingDocuments(false);
     }
   };
   
@@ -513,14 +510,14 @@ export default function RealTimeTranscription() {
 
         <button
           onClick={handleGenerateDocuments}
-          disabled={!transcription || isRecording}
+          disabled={!transcription || isRecording || isGeneratingDocuments}
           className={`px-4 py-2 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-            !transcription || isRecording
+            !transcription || isRecording || isGeneratingDocuments
               ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
               : 'bg-green-600 text-white hover:bg-green-700'
           } focus:ring-green-500`}
         >
-          Generate Documents
+          {isGeneratingDocuments ? 'Generating...' : 'Generate Documents'}
         </button>
       </div>
       
