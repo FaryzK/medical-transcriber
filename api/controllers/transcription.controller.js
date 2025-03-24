@@ -1,7 +1,13 @@
 import transcriptionService from '../services/transcription.service.js';
+import entityService from '../services/entity.service.js';
 
 // Store active transcription sessions
 const activeSessions = new Map();
+
+let transcriptionStream = null;
+let isStreamActive = false;
+let confirmedText = '';
+let lastProcessedLength = 0;
 
 /**
  * Handle a new WebSocket connection for real-time transcription
@@ -12,7 +18,6 @@ export const handleSocketConnection = (socket) => {
   
   let mediaStream = null;
   let isFirstChunk = true;
-  let isStreamActive = false;
   
   // Handle ready event from client
   socket.on('ready', (data, callback) => {
@@ -165,4 +170,293 @@ export const handleSocketConnection = (socket) => {
       console.error(`Error cleaning up on disconnect: ${error.message}`);
     }
   });
-}; 
+};
+
+export function startTranscription(req, res) {
+  // ... existing code ...
+}
+
+export function stopTranscription(req, res) {
+  // ... existing code ...
+}
+
+export async function audioData(req, res) {
+  try {
+    if (!isStreamActive) {
+      return res.status(400).json({ error: 'No active transcription stream available' });
+    }
+
+    const { audioData } = req.body;
+
+    if (!audioData) {
+      return res.status(400).json({ error: 'No audio data provided' });
+    }
+
+    const results = await transcriptionService.processAudioData(audioData, transcriptionStream);
+    
+    if (results && results.results) {
+      // Get the most stable results (highest stability = confirmed text)
+      const stable = results.results.filter(result => result.isFinal);
+      
+      if (stable.length > 0) {
+        // Update confirmed text with the latest stable results
+        const transcript = stable
+          .map(result => result.alternatives[0].transcript)
+          .join(' ');
+        
+        // Append to confirmed text
+        confirmedText += ' ' + transcript;
+        confirmedText = confirmedText.trim();
+        
+        // Extract entities from the newly confirmed portion
+        if (confirmedText.length > lastProcessedLength) {
+          const newText = confirmedText.substring(lastProcessedLength);
+          const entities = await entityService.extractEntities(newText);
+          
+          // Adjust entity indices to match the full text
+          if (entities && entities.entities) {
+            entities.entities.forEach(entity => {
+              entity.startIndex += lastProcessedLength;
+              entity.endIndex += lastProcessedLength;
+            });
+            
+            // Send entities back to the client
+            global.io.emit('entities', { 
+              confirmedText, 
+              entities: entities.entities,
+              newTextStartIndex: lastProcessedLength
+            });
+          }
+          
+          lastProcessedLength = confirmedText.length;
+        }
+      }
+
+      return res.json(results);
+    }
+
+    return res.json({});
+  } catch (error) {
+    console.error('Error processing audio data:', error);
+    return res.status(500).json({ error: 'Failed to process audio data' });
+  }
+}
+
+export function endTranscriptionSession(req, res) {
+  try {
+    transcriptionStream = null;
+    isStreamActive = false;
+    confirmedText = '';
+    lastProcessedLength = 0;
+    
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Error ending transcription session:', error);
+    return res.status(500).json({ error: 'Failed to end transcription session' });
+  }
+}
+
+export function setupTranscriptionSocket(namespace) {
+  namespace.on('connection', (socket) => {
+    console.log(`New transcription connection: ${socket.id}`);
+    
+    let recognizeStream = null;
+    let sessionId = null;
+    let confirmedText = '';
+    let lastProcessedLength = 0;
+    
+    // Handle ready event from client
+    socket.on('ready', async ({ language = 'en-US' }, callback) => {
+      try {
+        console.log(`Client ${socket.id} ready for transcription in language: ${language}`);
+        
+        // Generate a unique session ID
+        sessionId = `session_${Date.now()}_${socket.id}`;
+        console.log(`Created session ID: ${sessionId}`);
+        
+        // Initialize transcription stream
+        recognizeStream = transcriptionService.createStreamingRecognitionRequest((data) => {
+          // Handle errors
+          if (data.error) {
+            console.error(`Error in transcription session ${sessionId}:`, data.error);
+            socket.emit('error', { message: data.error });
+            return;
+          }
+          
+          // Forward transcription results to the client
+          if (data.results) {
+            socket.emit('transcription', data);
+            
+            // Process confirmed (final) segments for entity extraction
+            const stable = data.results.filter(result => result.isFinal);
+            
+            if (stable.length > 0) {
+              // Update confirmed text with the latest stable results
+              const transcript = stable
+                .map(result => result.alternatives[0].transcript)
+                .join(' ');
+              
+              // Append to confirmed text
+              confirmedText += ' ' + transcript;
+              confirmedText = confirmedText.trim();
+              
+              // Extract entities from the newly confirmed portion
+              if (confirmedText.length > lastProcessedLength) {
+                const newText = confirmedText.substring(lastProcessedLength);
+                processEntities(newText, confirmedText, lastProcessedLength, socket);
+                lastProcessedLength = confirmedText.length;
+              }
+            }
+          }
+          
+          // Forward status updates to the client
+          if (data.status) {
+            socket.emit('ready', data);
+          }
+        }, language);
+        
+        // Store session information
+        activeSessions.set(sessionId, {
+          socket,
+          recognizeStream,
+          language,
+          confirmedText,
+          lastProcessedLength
+        });
+        
+        // Return success to the client
+        if (callback) {
+          callback({ 
+            status: 'success', 
+            sessionId, 
+            simulation: recognizeStream?.simulation || false
+          });
+        }
+      } catch (error) {
+        console.error('Error setting up transcription:', error);
+        if (callback) {
+          callback({ status: 'error', message: error.message });
+        }
+      }
+    });
+    
+    // Handle audio data from client
+    socket.on('audioData', async (audioData) => {
+      try {
+        if (!recognizeStream) {
+          socket.emit('error', { message: 'No active transcription stream available' });
+          return;
+        }
+        
+        // Process the audio data
+        if (Buffer.isBuffer(audioData) || (audioData instanceof Uint8Array)) {
+          recognizeStream.write(audioData);
+        } else {
+          console.warn('Received non-buffer audio data:', typeof audioData);
+          socket.emit('error', { message: 'Invalid audio data format' });
+        }
+      } catch (error) {
+        console.error('Error processing audio data:', error);
+        socket.emit('error', { message: 'Failed to process audio data: ' + error.message });
+      }
+    });
+    
+    // Handle stop signal from client
+    socket.on('stop', () => {
+      try {
+        console.log(`Client ${socket.id} stopped transcription`);
+        
+        if (recognizeStream) {
+          recognizeStream.end();
+          recognizeStream = null;
+        }
+        
+        socket.emit('transcriptionStopped');
+        
+        // Clean up session
+        if (sessionId) {
+          activeSessions.delete(sessionId);
+          sessionId = null;
+        }
+        
+        // Reset session data
+        confirmedText = '';
+        lastProcessedLength = 0;
+      } catch (error) {
+        console.error('Error stopping transcription:', error);
+        socket.emit('error', { message: 'Failed to stop transcription: ' + error.message });
+      }
+    });
+    
+    // Handle disconnect event
+    socket.on('disconnect', () => {
+      console.log(`Client disconnected: ${socket.id}`);
+      
+      // Clean up resources
+      if (recognizeStream) {
+        recognizeStream.end();
+      }
+      
+      // Remove session
+      if (sessionId) {
+        activeSessions.delete(sessionId);
+      }
+    });
+  });
+}
+
+// Process entities from confirmed text
+async function processEntities(newText, fullText, startPosition, socket) {
+  try {
+    console.log(`Processing entities for text: "${newText}"`);
+    console.log(`Start position in full text: ${startPosition}`);
+    
+    const entitiesResult = await entityService.extractEntities(newText);
+    
+    if (entitiesResult && entitiesResult.entities && entitiesResult.entities.length > 0) {
+      console.log(`Extracted ${entitiesResult.entities.length} entities`);
+      
+      // Adjust indices to match position in the full text
+      const adjustedEntities = entitiesResult.entities.map(entity => ({
+        ...entity,
+        startIndex: entity.startIndex + startPosition,
+        endIndex: entity.endIndex + startPosition
+      }));
+      
+      // Validate adjusted entities
+      const validEntities = adjustedEntities.filter(entity => {
+        const isValid = entity.startIndex >= 0 && 
+                       entity.endIndex <= fullText.length && 
+                       entity.startIndex < entity.endIndex;
+        
+        if (!isValid) {
+          console.warn(`Invalid entity after adjustment: ${entity.category} at ${entity.startIndex}-${entity.endIndex}`);
+        }
+        
+        return isValid;
+      });
+      
+      // Send entities back to the client
+      if (socket && socket.connected) {
+        try {
+          socket.emit('entities', { 
+            confirmedText: fullText, 
+            entities: validEntities,
+            newTextStartIndex: startPosition
+          });
+          
+          console.log(`Sent ${validEntities.length} entities to client at position ${startPosition}`);
+        } catch (emitError) {
+          console.error('Error emitting entities to client:', emitError);
+        }
+      } else {
+        console.warn('Cannot send entities - socket disconnected');
+      }
+    } else {
+      console.log('No entities extracted from text');
+    }
+  } catch (error) {
+    console.error('Error processing entities:', error);
+    // Don't try to emit if there was an error - it might be socket-related
+  }
+} 

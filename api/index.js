@@ -4,9 +4,11 @@ import dotenv from 'dotenv'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 import testRoute from './routes/test.route.js'
-import { handleSocketConnection } from './controllers/transcription.controller.js'
+import { handleSocketConnection, setupTranscriptionSocket } from './controllers/transcription.controller.js'
 import { transcribeFile } from './controllers/fileTranscription.controller.js'
 import { generateDocuments, downloadDocument } from './controllers/document.controller.js'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 dotenv.config()
 
@@ -48,11 +50,7 @@ io.use((socket, next) => {
 
 // Set up Socket.IO for real-time transcription
 const transcriptionNamespace = io.of('/transcription');
-
-transcriptionNamespace.on('connection', (socket) => {
-  console.log(`New transcription connection: ${socket.id}`);
-  handleSocketConnection(socket);
-});
+setupTranscriptionSocket(transcriptionNamespace);
 
 // Start the server
 httpServer.listen(PORT, () => {

@@ -16,6 +16,8 @@ export default function RealTimeTranscription() {
   const [generatedFiles, setGeneratedFiles] = useState([]);
   const [isGeneratingDocuments, setIsGeneratingDocuments] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [entities, setEntities] = useState([]);
+  const [confirmedText, setConfirmedText] = useState('');
   
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -41,6 +43,91 @@ export default function RealTimeTranscription() {
     };
   }, []);
   
+  // Function to format text with entities
+  const formatTextWithEntities = (text, entities) => {
+    try {
+      if (!text || typeof text !== 'string') {
+        return '';
+      }
+      
+      if (!entities || !Array.isArray(entities) || entities.length === 0) {
+        return text;
+      }
+
+      // Create a safe copy of entities with additional validation
+      const safeEntities = entities.filter(entity => {
+        try {
+          // Double check if entity text actually matches the text at specified indices
+          const actualText = text.substring(entity.startIndex, entity.endIndex);
+          const isValid = entity && 
+            typeof entity.startIndex === 'number' && 
+            typeof entity.endIndex === 'number' &&
+            entity.startIndex >= 0 && 
+            entity.endIndex <= text.length &&
+            entity.startIndex < entity.endIndex;
+          
+          if (!isValid) {
+            console.warn(`Entity validation failed for ${entity?.category} at positions ${entity?.startIndex}-${entity?.endIndex}`);
+          }
+          
+          return isValid;
+        } catch (e) {
+          console.error('Error validating entity:', e);
+          return false;
+        }
+      });
+      
+      // Sort entities by startIndex in descending order to avoid index shifting
+      const sortedEntities = [...safeEntities].sort((a, b) => b.startIndex - a.startIndex);
+      
+      let result = text;
+      
+      // Apply styling to each entity
+      for (const entity of sortedEntities) {
+        try {
+          const { startIndex, endIndex, category, text: entityText } = entity;
+          
+          // Determine styling based on category
+          let style = '';
+          switch (category) {
+            case 'PHI':
+              style = 'color: red;';
+              break;
+            case 'CONDITION':
+              style = 'color: darkgreen;';
+              break;
+            case 'ANATOMY':
+              style = 'font-style: italic;';
+              break;
+            case 'MEDICATION':
+              style = 'background-color: rgba(255, 255, 0, 0.3);';
+              break;
+            case 'PROCEDURE':
+              style = 'color: darkblue;';
+              break;
+            default:
+              continue;
+          }
+          
+          // Insert styled spans
+          const before = result.substring(0, startIndex);
+          const textSegment = result.substring(startIndex, endIndex);
+          const after = result.substring(endIndex);
+          
+          result = `${before}<span style="${style}" title="${category}: ${textSegment}">${textSegment}</span>${after}`;
+        } catch (entityError) {
+          console.error('Error formatting entity:', entityError);
+          // Continue with next entity if there's an error with this one
+        }
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('Error in formatTextWithEntities:', error);
+      return text || ''; // Return original text if there's an error
+    }
+  };
+
   // Helper function to add debug info
   const addDebug = (message) => {
     setDebugInfo(prev => prev + (prev ? '\n' : '') + message);
@@ -116,6 +203,54 @@ export default function RealTimeTranscription() {
         }
       } else {
         addDebug(`No results found in transcription data`);
+      }
+    });
+
+    // Listen for entity events
+    socket.on('entities', (data) => {
+      try {
+        addDebug(`Received entities: ${JSON.stringify(data)}`);
+        if (data && data.entities && Array.isArray(data.entities) && data.confirmedText) {
+          // Filter out any malformed entities
+          const validEntities = data.entities.filter(entity => 
+            entity && 
+            typeof entity.startIndex === 'number' && 
+            typeof entity.endIndex === 'number' &&
+            entity.startIndex >= 0 && 
+            entity.endIndex <= data.confirmedText.length &&
+            entity.startIndex < entity.endIndex &&
+            entity.category &&
+            ['PHI', 'CONDITION', 'ANATOMY', 'MEDICATION', 'PROCEDURE'].includes(entity.category)
+          );
+          
+          if (validEntities.length !== data.entities.length) {
+            addDebug(`Filtered out ${data.entities.length - validEntities.length} invalid entities`);
+          }
+          
+          setConfirmedText(data.confirmedText);
+          
+          // Completely replace entities to avoid duplicates and ensure updates
+          setEntities(current => {
+            // Remove any entities from the exact same text range (replacing with new ones)
+            const filteredEntities = current.filter(existingEntity => {
+              // Keep entities not in the current batch
+              return !validEntities.some(newEntity => 
+                newEntity.startIndex === existingEntity.startIndex && 
+                newEntity.endIndex === existingEntity.endIndex
+              );
+            });
+            
+            // Add new entities
+            return [...filteredEntities, ...validEntities];
+          });
+          
+          addDebug(`Added ${validEntities.length} entities to display`);
+        } else {
+          addDebug('Received malformed entity data');
+        }
+      } catch (error) {
+        addDebug(`Error processing entities: ${error.message}`);
+        console.error('Error processing entity data:', error);
       }
     });
 
@@ -345,6 +480,8 @@ export default function RealTimeTranscription() {
   const handleClearTranscription = () => {
     setTranscription('');
     setInterimTranscription('');
+    setConfirmedText('');
+    setEntities([]);
   };
   
   const clearDebugInfo = () => {
@@ -491,13 +628,22 @@ export default function RealTimeTranscription() {
           {!transcription && !interimTranscription && !isRecording ? (
             <p className="text-gray-400 italic">Transcription will appear here...</p>
           ) : (
-            <div className="text-gray-800 whitespace-pre-wrap">
-              {transcription}
-              {interimTranscription && (
-                <span className="text-gray-400 italic"> {interimTranscription}</span>
-              )}
+            <div className="text-gray-800">
+              <div 
+                dangerouslySetInnerHTML={{ 
+                  __html: formatTextWithEntities(transcription, entities) + 
+                          (interimTranscription ? ` <span class="text-gray-400 italic">${interimTranscription}</span>` : '')
+                }} 
+              />
             </div>
           )}
+        </div>
+        <div className="mt-2 text-xs text-gray-500 flex flex-wrap gap-4">
+          <div><span className="inline-block w-3 h-3 mr-1" style={{color: 'red'}}>■</span> PHI</div>
+          <div><span className="inline-block w-3 h-3 mr-1" style={{color: 'darkgreen'}}>■</span> Medical Condition</div>
+          <div><span className="inline-block mr-1 italic">I</span> Anatomy</div>
+          <div><span className="inline-block w-3 h-3 mr-1 bg-yellow-200"></span> Medication</div>
+          <div><span className="inline-block w-3 h-3 mr-1" style={{color: 'darkblue'}}>■</span> Procedures/Tests</div>
         </div>
       </div>
       
