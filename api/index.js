@@ -5,6 +5,7 @@ import { createServer } from 'http'
 import { Server } from 'socket.io'
 import testRoute from './routes/test.route.js'
 import { handleSocketConnection } from './controllers/transcription.controller.js'
+import { transcribeFile } from './controllers/fileTranscription.controller.js'
 
 dotenv.config()
 
@@ -15,29 +16,21 @@ const PORT = process.env.PORT || 3000
 const httpServer = createServer(app)
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-    allowedHeaders: ["my-custom-header"],
-    credentials: true
+    origin: "http://localhost:5173",
+    methods: ["GET", "POST"]
   },
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  connectionStateRecovery: {
-    maxDisconnectionDuration: 30000
-  },
-  transports: ['polling', 'websocket'],
   path: '/socket.io'
 })
 
 // Middleware
-app.use(cors({
-  origin: "*",
-  credentials: true
-}))
+app.use(cors())
 app.use(express.json())
 
 // Routes
 app.use('/api', testRoute)
+
+// File transcription endpoint
+app.post('/api/transcribe-file', transcribeFile)
 
 // Logging middleware for Socket.IO
 io.use((socket, next) => {

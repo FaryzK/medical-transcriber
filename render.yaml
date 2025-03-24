@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: medical-transcriber
+    env: node
+    buildCommand: npm install
+    startCommand: npm run dev
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GOOGLE_CLOUD_CREDENTIALS
+        sync: false # This will be set manually in Render dashboard
+    plan: starter # Choose your plan type 
