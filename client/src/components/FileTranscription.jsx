@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { FaSpinner } from 'react-icons/fa';
 
 export default function FileTranscription() {
   const [file, setFile] = useState(null);
@@ -10,6 +11,8 @@ export default function FileTranscription() {
   const fileInputRef = useRef(null);
   const [generatedFiles, setGeneratedFiles] = useState([]);
   const [isGeneratingDocuments, setIsGeneratingDocuments] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcriptionResult, setTranscriptionResult] = useState(null);
 
   const handleFileChange = (event) => {
     const selectedFile = event.target.files[0];
@@ -175,6 +178,35 @@ export default function FileTranscription() {
     }
   };
 
+  const handleTranscribe = async () => {
+    if (!file) return;
+
+    setIsTranscribing(true);
+    setError(null);
+    setTranscriptionResult(null);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Transcription failed');
+      }
+
+      const result = await response.json();
+      setTranscriptionResult(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
   return (
     <div className="p-4 space-y-4 bg-white rounded-lg shadow-md">
       <h2 className="text-xl font-semibold text-gray-800">Audio File Transcription</h2>
@@ -241,7 +273,14 @@ export default function FileTranscription() {
                 : 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500'
               }`}
           >
-            {isProcessing ? 'Processing...' : 'Transcribe'}
+            {isProcessing ? (
+              <span className="flex items-center">
+                Processing
+                <FaSpinner className="animate-spin ml-2" />
+              </span>
+            ) : (
+              'Transcribe'
+            )}
           </button>
 
           <button
@@ -267,7 +306,14 @@ export default function FileTranscription() {
                 : 'bg-green-600 text-white hover:bg-green-700'
             } focus:ring-green-500`}
           >
-            {isGeneratingDocuments ? 'Generating...' : 'Generate Documents'}
+            {isGeneratingDocuments ? (
+              <span className="flex items-center">
+                Generating
+                <FaSpinner className="animate-spin ml-2" />
+              </span>
+            ) : (
+              'Generate Documents'
+            )}
           </button>
         </div>
       </form>
@@ -350,6 +396,47 @@ export default function FileTranscription() {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {transcriptionResult && (
+        <div className="mt-4">
+          <h3 className="font-bold mb-2">Transcription Result:</h3>
+          <p className="whitespace-pre-wrap mb-4">{transcriptionResult.text}</p>
+          
+          <button
+            onClick={handleGenerateDocuments}
+            disabled={isGeneratingDocuments}
+            className="bg-green-500 text-white px-4 py-2 rounded disabled:bg-gray-400"
+          >
+            {isGeneratingDocuments ? (
+              <span className="flex items-center">
+                Generating
+                <FaSpinner className="animate-spin ml-2" />
+              </span>
+            ) : (
+              'Generate Documents'
+            )}
+          </button>
+
+          {generatedFiles.length > 0 && (
+            <div className="mt-4">
+              <h4 className="font-bold mb-2">Generated Files:</h4>
+              <ul className="list-disc pl-5">
+                {generatedFiles.map((file, index) => (
+                  <li key={index} className="flex items-center">
+                    {file.name}
+                    {file.status === 'downloading' && (
+                      <FaSpinner className="animate-spin ml-2" />
+                    )}
+                    {file.status === 'downloaded' && (
+                      <span className="text-green-500 ml-2">✓</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>

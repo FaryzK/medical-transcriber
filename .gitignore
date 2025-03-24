@@ -58,3 +58,7 @@ node_modules
 /node_modules
 */node_modules
 **/node_modules
+
+# documents
+.env
+api/documents/

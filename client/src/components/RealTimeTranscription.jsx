@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
+import { FaSpinner } from 'react-icons/fa';
 
 export default function RealTimeTranscription() {
   const [isRecording, setIsRecording] = useState(false);
@@ -14,6 +15,7 @@ export default function RealTimeTranscription() {
   const [isConnected, setIsConnected] = useState(false);
   const [generatedFiles, setGeneratedFiles] = useState([]);
   const [isGeneratingDocuments, setIsGeneratingDocuments] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -352,8 +354,11 @@ export default function RealTimeTranscription() {
   const handleGenerateDocuments = async () => {
     if (!transcription) return;
 
+    setIsGenerating(true);
+    setGeneratedFiles([]);
+    setError(null);
+
     try {
-      setIsGeneratingDocuments(true);
       const response = await fetch('/api/generate-documents', {
         method: 'POST',
         headers: {
@@ -365,17 +370,30 @@ export default function RealTimeTranscription() {
         }),
       });
 
-      const data = await response.json();
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to generate documents');
+      if (!response.ok) {
+        throw new Error('Document generation failed');
       }
 
-      setGeneratedFiles(data.files);
-    } catch (error) {
-      console.error('Error generating documents:', error);
-      alert('Failed to generate documents: ' + error.message);
+      const { files } = await response.json();
+      
+      // Download files one by one and update UI
+      for (const file of files) {
+        setGeneratedFiles(prev => [...prev, { name: file, status: 'downloading' }]);
+        
+        const downloadWindow = window.open(`/api/download-document/${file}`, '_blank');
+        if (downloadWindow) {
+          setGeneratedFiles(prev => 
+            prev.map(f => f.name === file ? { ...f, status: 'downloaded' } : f)
+          );
+        }
+        
+        // Wait a short delay between downloads
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } catch (err) {
+      setError(err.message);
     } finally {
-      setIsGeneratingDocuments(false);
+      setIsGenerating(false);
     }
   };
   
@@ -510,14 +528,21 @@ export default function RealTimeTranscription() {
 
         <button
           onClick={handleGenerateDocuments}
-          disabled={!transcription || isRecording || isGeneratingDocuments}
+          disabled={!transcription || isRecording || isGenerating}
           className={`px-4 py-2 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-            !transcription || isRecording || isGeneratingDocuments
+            !transcription || isRecording || isGenerating
               ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
               : 'bg-green-600 text-white hover:bg-green-700'
           } focus:ring-green-500`}
         >
-          {isGeneratingDocuments ? 'Generating...' : 'Generate Documents'}
+          {isGenerating ? (
+            <span className="flex items-center">
+              Generating
+              <FaSpinner className="animate-spin ml-2" />
+            </span>
+          ) : (
+            'Generate Documents'
+          )}
         </button>
       </div>
       
@@ -528,7 +553,7 @@ export default function RealTimeTranscription() {
             {generatedFiles.map((file, index) => (
               <button
                 key={index}
-                onClick={() => handleDownloadFile(file.filename)}
+                onClick={() => handleDownloadFile(file.name)}
                 className="block w-full text-left px-4 py-2 bg-white hover:bg-gray-50 border rounded-md shadow-sm group"
               >
                 <div className="flex items-center space-x-2">
@@ -546,7 +571,7 @@ export default function RealTimeTranscription() {
                     />
                   </svg>
                   <span className="text-blue-600 group-hover:text-blue-800 underline">
-                    {file.filename}
+                    {file.name}
                   </span>
                 </div>
               </button>
