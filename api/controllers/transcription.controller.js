@@ -12,6 +12,7 @@ export const handleSocketConnection = (socket) => {
   
   let mediaStream = null;
   let isFirstChunk = true;
+  let isStreamActive = false;
   
   // Handle ready event from client
   socket.on('ready', (data, callback) => {
@@ -34,6 +35,7 @@ export const handleSocketConnection = (socket) => {
         
         if (data.status === 'ready') {
           console.log('Transcription service ready');
+          isStreamActive = true;
           socket.emit('ready', { 
             simulation: data.simulation || false,
             message: 'Transcription service ready' 
@@ -46,8 +48,10 @@ export const handleSocketConnection = (socket) => {
             });
           }
         } else if (data.results) {
-          console.log(`Emitting transcription results to client ${socket.id}: ${JSON.stringify(data.results)}`);
-          socket.emit('transcription', data);
+          if (isStreamActive) {
+            console.log(`Emitting transcription results to client ${socket.id}: ${JSON.stringify(data.results)}`);
+            socket.emit('transcription', data);
+          }
         }
       }, language);
       
@@ -70,13 +74,20 @@ export const handleSocketConnection = (socket) => {
   // Handle audio data from client
   socket.on('audioData', (data) => {
     try {
-      console.log(`[AudioData] Received audio data from client ${socket.id}, size: ${data.length} bytes`);
-      
       if (!mediaStream) {
         console.error('No active transcription stream available');
         socket.emit('error', { message: 'No active transcription stream available' });
         return;
       }
+
+      // Only log and emit error if stream is not active and not in stopping state
+      if (!isStreamActive && !mediaStream.stopping) {
+        console.error('Stream is not active');
+        socket.emit('error', { message: 'Stream is not active. Please start a new recording.' });
+        return;
+      }
+      
+      console.log(`[AudioData] Received audio data from client ${socket.id}, size: ${data.length} bytes`);
       
       // Log info about the first chunk to help with debugging
       if (isFirstChunk) {
@@ -85,11 +96,13 @@ export const handleSocketConnection = (socket) => {
         isFirstChunk = false;
       }
       
-      // Write the audio data to the transcription service stream
-      const writeSuccess = mediaStream.write(data);
-      
-      if (!writeSuccess) {
-        console.warn('Write operation returned false - backpressure may be occurring');
+      // Write the audio data to the transcription service stream if it's still available
+      if (mediaStream && !mediaStream.destroyed) {
+        const writeSuccess = mediaStream.write(data);
+        
+        if (!writeSuccess) {
+          console.warn('Write operation returned false - backpressure may be occurring');
+        }
       }
     } catch (error) {
       console.error(`Error processing audio data: ${error.message}`);
@@ -102,17 +115,33 @@ export const handleSocketConnection = (socket) => {
   socket.on('stop', () => {
     console.log(`Client ${socket.id} stopping transcription`);
     try {
-      if (mediaStream) {
-        console.log('Ending media stream...');
-        mediaStream.end();
-        mediaStream = null;
-        console.log('Media stream ended successfully');
-        console.log('Transcription service stopped successfully');
-      } else {
-        console.log('No active media stream to end');
+      if (!mediaStream) {
+        socket.emit('stopped', { message: 'Transcription already stopped' });
+        return;
       }
+
+      // Mark stream as stopping to handle graceful shutdown
+      mediaStream.stopping = true;
+      isStreamActive = false;
       
-      socket.emit('stopped', { message: 'Transcription stopped successfully' });
+      // Give a small delay to allow any in-flight audio data to be processed
+      setTimeout(() => {
+        try {
+          if (mediaStream) {
+            console.log('Ending media stream...');
+            mediaStream.end();
+            mediaStream = null;
+            console.log('Media stream ended successfully');
+          }
+          
+          // Send stop acknowledgment to client
+          socket.emit('stopped', { message: 'Transcription stopped successfully' });
+        } catch (error) {
+          console.error(`Error in delayed stream cleanup: ${error.message}`);
+          socket.emit('error', { message: `Error stopping transcription: ${error.message}` });
+        }
+      }, 500); // 500ms delay to allow in-flight data to be processed
+      
     } catch (error) {
       console.error(`Error stopping transcription: ${error.message}`);
       socket.emit('error', { message: `Error stopping transcription: ${error.message}` });
@@ -124,12 +153,13 @@ export const handleSocketConnection = (socket) => {
     console.log(`Client ${socket.id} disconnected. Reason: ${reason}`);
     
     try {
+      isStreamActive = false;
+      
       if (mediaStream) {
         console.log('Ending media stream due to disconnect...');
         mediaStream.end();
         mediaStream = null;
         console.log('Media stream ended due to disconnect');
-        console.log('Transcription service stopped due to disconnect');
       }
     } catch (error) {
       console.error(`Error cleaning up on disconnect: ${error.message}`);

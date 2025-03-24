@@ -268,36 +268,65 @@ export default function RealTimeTranscription() {
     try {
       addDebug('Stopping recording...');
       
-      // Stop the MediaRecorder
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        addDebug('Stopping MediaRecorder');
-        mediaRecorderRef.current.stop();
-      }
-      
-      // Stop all tracks in the stream
-      if (streamRef.current) {
-        addDebug('Stopping audio tracks');
-        streamRef.current.getTracks().forEach(track => {
-          track.stop();
-          addDebug(`Stopped track: ${track.kind}`);
-        });
-        streamRef.current = null;
-      }
+      // Stop local recording first to prevent new audio data
+      stopLocalRecording();
       
       // Tell the server to stop transcription
       if (socketRef.current && socketRef.current.connected) {
         addDebug('Emitting stop event to server');
         socketRef.current.emit('stop');
+        
+        // Wait for server acknowledgment
+        socketRef.current.once('stopped', (data) => {
+          addDebug('Received stop acknowledgment from server');
+          setIsRecording(false);
+          setConnectionStatus('connected');
+        });
+        
+        // Set a timeout for the acknowledgment
+        setTimeout(() => {
+          if (isRecording) {
+            addDebug('Stop acknowledgment timeout - forcing stop');
+            setIsRecording(false);
+            setConnectionStatus('connected');
+          }
+        }, 2000);
+      } else {
+        // If no socket connection, just stop recording
+        setIsRecording(false);
+        setConnectionStatus('disconnected');
       }
       
-      setIsRecording(false);
-      addDebug('Recording stopped');
+      addDebug('Stop sequence initiated');
     } catch (err) {
       console.error('Error stopping recording:', err);
       addDebug(`Stop recording error: ${err.message}`);
       setError(`Failed to stop recording: ${err.message}`);
       // Force recording state to false even if there was an error
       setIsRecording(false);
+      setConnectionStatus('error');
+    }
+  };
+  
+  // Helper function to stop local recording components
+  const stopLocalRecording = () => {
+    addDebug('Stopping local recording components...');
+    
+    // Stop the MediaRecorder
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      addDebug('Stopping MediaRecorder');
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+    }
+    
+    // Stop all tracks in the stream
+    if (streamRef.current) {
+      addDebug('Stopping audio tracks');
+      streamRef.current.getTracks().forEach(track => {
+        track.stop();
+        addDebug(`Stopped track: ${track.kind}`);
+      });
+      streamRef.current = null;
     }
   };
   
