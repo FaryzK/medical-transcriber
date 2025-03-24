@@ -13,7 +13,6 @@ export default function FileTranscription() {
   const [isGeneratingDocuments, setIsGeneratingDocuments] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionResult, setTranscriptionResult] = useState(null);
-  const [entities, setEntities] = useState([]);
 
   const handleFileChange = (event) => {
     const selectedFile = event.target.files[0];
@@ -60,7 +59,6 @@ export default function FileTranscription() {
 
     setIsProcessing(true);
     setError(null);
-    setEntities([]); // Reset entities when starting new transcription
 
     try {
       const formData = new FormData();
@@ -80,55 +78,6 @@ export default function FileTranscription() {
 
       if (data.success) {
         setTranscriptionResults(data.results);
-        
-        // Extract entities from the combined transcription
-        const combinedText = getCombinedTranscription();
-        console.log("Combined transcription text:", combinedText);
-        
-        if (combinedText) {
-          try {
-            console.log("Sending entity extraction request...");
-            const entityResponse = await fetch('/api/extract-entities', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ text: combinedText }),
-            });
-            
-            if (entityResponse.ok) {
-              const entityData = await entityResponse.json();
-              console.log("Entity extraction response:", entityData);
-              
-              if (entityData.success && entityData.entities) {
-                // Basic validation of entities
-                const validEntities = entityData.entities.filter(entity => 
-                  entity && 
-                  typeof entity.startIndex === 'number' && 
-                  typeof entity.endIndex === 'number' &&
-                  entity.startIndex >= 0 && 
-                  entity.endIndex <= combinedText.length &&
-                  entity.startIndex < entity.endIndex &&
-                  entity.category &&
-                  ['PHI', 'CONDITION', 'ANATOMY', 'MEDICATION', 'PROCEDURE'].includes(entity.category)
-                );
-                
-                if (validEntities.length !== entityData.entities.length) {
-                  console.warn(`Filtered out ${entityData.entities.length - validEntities.length} invalid entities`);
-                }
-                
-                console.log("Setting valid entities:", validEntities);
-                setEntities(validEntities);
-              } else {
-                console.error("Entity extraction failed:", entityData.error);
-              }
-            } else {
-              console.error("Entity extraction request failed:", entityResponse.status);
-            }
-          } catch (entityError) {
-            console.error('Error extracting entities:', entityError);
-          }
-        }
       } else {
         throw new Error(data.error || 'Failed to transcribe file');
       }
@@ -265,99 +214,6 @@ export default function FileTranscription() {
     }
   };
 
-  // Function to format text with entities
-  const formatTextWithEntities = (text, entities) => {
-    try {
-      if (!text || typeof text !== 'string') {
-        console.log("No text to format");
-        return '';
-      }
-      
-      if (!entities || !Array.isArray(entities) || entities.length === 0) {
-        console.log("No entities to format");
-        return text;
-      }
-
-      console.log("Formatting text with entities:", { text, entities });
-
-      // Create a safe copy of entities with basic validation
-      const safeEntities = entities.filter(entity => {
-        try {
-          // Basic validation
-          const isValid = entity && 
-            typeof entity.startIndex === 'number' && 
-            typeof entity.endIndex === 'number' &&
-            entity.startIndex >= 0 && 
-            entity.endIndex <= text.length &&
-            entity.startIndex < entity.endIndex &&
-            entity.category &&
-            ['PHI', 'CONDITION', 'ANATOMY', 'MEDICATION', 'PROCEDURE'].includes(entity.category);
-          
-          if (!isValid) {
-            console.warn(`Invalid entity:`, entity);
-          }
-          
-          return isValid;
-        } catch (e) {
-          console.error('Error validating entity:', e);
-          return false;
-        }
-      });
-      
-      console.log("Safe entities:", safeEntities);
-      
-      // Sort entities by startIndex in descending order to avoid index shifting
-      const sortedEntities = [...safeEntities].sort((a, b) => b.startIndex - a.startIndex);
-      
-      let result = text;
-      
-      // Apply styling to each entity
-      for (const entity of sortedEntities) {
-        try {
-          const { startIndex, endIndex, category, text: entityText } = entity;
-          
-          // Determine styling based on category
-          let style = '';
-          switch (category) {
-            case 'PHI':
-              style = 'color: red;';
-              break;
-            case 'CONDITION':
-              style = 'color: darkgreen;';
-              break;
-            case 'ANATOMY':
-              style = 'font-style: italic;';
-              break;
-            case 'MEDICATION':
-              style = 'background-color: rgba(255, 255, 0, 0.3);';
-              break;
-            case 'PROCEDURE':
-              style = 'color: darkblue;';
-              break;
-            default:
-              continue;
-          }
-          
-          // Insert styled spans
-          const before = result.substring(0, startIndex);
-          const textSegment = result.substring(startIndex, endIndex);
-          const after = result.substring(endIndex);
-          
-          result = `${before}<span style="${style}" title="${category}: ${textSegment}">${textSegment}</span>${after}`;
-          console.log(`Applied formatting for ${category}: "${textSegment}"`);
-        } catch (entityError) {
-          console.error('Error formatting entity:', entityError);
-          // Continue with next entity if there's an error with this one
-        }
-      }
-      
-      return result;
-    } catch (error) {
-      console.error('Error in formatTextWithEntities:', error);
-      return text || ''; // Return original text if there's an error
-    }
-  };
-
   return (
     <div className="p-4 space-y-4 bg-white rounded-lg shadow-md">
       <h2 className="text-xl font-semibold text-gray-800">Audio File Transcription</h2>
@@ -485,21 +341,9 @@ export default function FileTranscription() {
 
           {/* Combined view */}
           <div className="mb-4 p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
-            <p 
-              className="text-gray-800 whitespace-pre-wrap leading-relaxed"
-              dangerouslySetInnerHTML={{ 
-                __html: formatTextWithEntities(getCombinedTranscription(), entities)
-              }}
-            />
-          </div>
-
-          {/* Entity Legend */}
-          <div className="mt-2 text-xs text-gray-500 flex flex-wrap gap-4">
-            <div><span className="inline-block w-3 h-3 mr-1" style={{color: 'red'}}>■</span> PHI</div>
-            <div><span className="inline-block w-3 h-3 mr-1" style={{color: 'darkgreen'}}>■</span> Medical Condition</div>
-            <div><span className="inline-block mr-1 italic">I</span> Anatomy</div>
-            <div><span className="inline-block w-3 h-3 mr-1 bg-yellow-200"></span> Medication</div>
-            <div><span className="inline-block w-3 h-3 mr-1" style={{color: 'darkblue'}}>■</span> Procedures/Tests</div>
+            <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">
+              {getCombinedTranscription()}
+            </p>
           </div>
 
           {/* Detailed view with confidence scores */}
@@ -517,12 +361,7 @@ export default function FileTranscription() {
                       borderLeftColor: `rgb(${Math.round(255 - (result.confidence * 255))}, ${Math.round(result.confidence * 255)}, 0)`
                     }}
                   >
-                    <p 
-                      className="text-gray-800"
-                      dangerouslySetInnerHTML={{ 
-                        __html: formatTextWithEntities(result.transcript, entities)
-                      }}
-                    />
+                    <p className="text-gray-800">{result.transcript}</p>
                     <p className="text-sm text-gray-500 mt-1">
                       Confidence: {Math.round(result.confidence * 100)}%
                     </p>
