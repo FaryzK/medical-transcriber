@@ -122,11 +122,16 @@ export default function FileTranscription() {
   };
 
   const handleGenerateDocuments = async () => {
-    if (!transcriptionResults) return;
+    if (!transcriptionResults || transcriptionResults.length === 0) return;
 
     try {
       setIsGeneratingDocuments(true);
+      setGeneratedFiles([]);
+      setError(null);
+      
       const combinedText = getCombinedTranscription();
+      console.log("Generating documents for text:", combinedText.substring(0, 100) + "...");
+      
       const response = await fetch('/api/generate-documents', {
         method: 'POST',
         headers: {
@@ -138,44 +143,46 @@ export default function FileTranscription() {
         }),
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+
       const data = await response.json();
+      
+      console.log("Document generation response:", data);
+      
       if (!data.success) {
         throw new Error(data.error || 'Failed to generate documents');
       }
 
-      setGeneratedFiles(data.files);
+      // Process file objects from response
+      const files = data.files || [];
+      const processedFiles = files.map(file => {
+        return typeof file === 'string' 
+          ? { name: file, status: 'ready' }
+          : { name: file.filename, status: 'ready' };
+      });
+      
+      setGeneratedFiles(processedFiles);
     } catch (error) {
       console.error('Error generating documents:', error);
-      alert('Failed to generate documents: ' + error.message);
+      setError(`Failed to generate documents: ${error.message}`);
     } finally {
       setIsGeneratingDocuments(false);
     }
   };
 
   const handleDownloadFile = async (filename) => {
-    try {
-      const response = await fetch(`/api/download-document/${filename}`);
-      
-      if (!response.ok) {
-        throw new Error('File not found');
-      }
-      
-      // Create a blob from the file data
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      
-      // Create a temporary link and click it to download
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error downloading file:', error);
-      alert('Failed to download file: ' + error.message);
+    const downloadWindow = window.open(`/api/download-document/${filename}`, '_blank');
+    if (!downloadWindow) {
+      throw new Error('Pop-up blocked or failed to open download window');
     }
+    
+    return new Promise((resolve) => {
+      // We can't perfectly track download completion in a new window
+      // So we'll just resolve after a short timeout
+      setTimeout(resolve, 1000);
+    });
   };
 
   const handleTranscribe = async () => {
@@ -368,11 +375,12 @@ export default function FileTranscription() {
       {generatedFiles.length > 0 && (
         <div className="mt-4">
           <h3 className="text-lg font-semibold mb-2">Generated Documents</h3>
+          <p className="text-sm text-gray-600 mb-2">Available documents:</p>
           <div className="space-y-2">
             {generatedFiles.map((file, index) => (
               <button
                 key={index}
-                onClick={() => handleDownloadFile(file.filename)}
+                onClick={() => handleDownloadFile(file.name)}
                 className="block w-full text-left px-4 py-2 bg-white hover:bg-gray-50 border rounded-md shadow-sm group"
               >
                 <div className="flex items-center space-x-2">
@@ -390,7 +398,7 @@ export default function FileTranscription() {
                     />
                   </svg>
                   <span className="text-blue-600 group-hover:text-blue-800 underline">
-                    {file.filename}
+                    {file.name}
                   </span>
                 </div>
               </button>
@@ -422,16 +430,16 @@ export default function FileTranscription() {
           {generatedFiles.length > 0 && (
             <div className="mt-4">
               <h4 className="font-bold mb-2">Generated Files:</h4>
+              <p className="text-sm text-gray-600 mb-2">Available files:</p>
               <ul className="list-disc pl-5">
                 {generatedFiles.map((file, index) => (
-                  <li key={index} className="flex items-center">
-                    {file.name}
-                    {file.status === 'downloading' && (
-                      <FaSpinner className="animate-spin ml-2" />
-                    )}
-                    {file.status === 'downloaded' && (
-                      <span className="text-green-500 ml-2">✓</span>
-                    )}
+                  <li key={index} className="mb-2">
+                    <button 
+                      onClick={() => handleDownloadFile(file.name)}
+                      className="text-blue-600 hover:text-blue-800 underline"
+                    >
+                      {file.name}
+                    </button>
                   </li>
                 ))}
               </ul>

@@ -496,6 +496,8 @@ export default function RealTimeTranscription() {
     setError(null);
 
     try {
+      console.log("Generating documents for text:", transcription.substring(0, 100) + "...");
+      
       const response = await fetch('/api/generate-documents', {
         method: 'POST',
         headers: {
@@ -508,56 +510,45 @@ export default function RealTimeTranscription() {
       });
 
       if (!response.ok) {
-        throw new Error('Document generation failed');
+        throw new Error(`HTTP error ${response.status}`);
       }
 
-      const { files } = await response.json();
+      const data = await response.json();
+      console.log("Document generation response:", data);
       
-      // Download files one by one and update UI
-      for (const file of files) {
-        setGeneratedFiles(prev => [...prev, { name: file, status: 'downloading' }]);
-        
-        const downloadWindow = window.open(`/api/download-document/${file}`, '_blank');
-        if (downloadWindow) {
-          setGeneratedFiles(prev => 
-            prev.map(f => f.name === file ? { ...f, status: 'downloaded' } : f)
-          );
-        }
-        
-        // Wait a short delay between downloads
-        await new Promise(resolve => setTimeout(resolve, 500));
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to generate documents');
       }
+      
+      // Process file objects from response
+      const files = data.files || [];
+      const processedFiles = files.map(file => {
+        return typeof file === 'string' 
+          ? { name: file, status: 'ready' }
+          : { name: file.filename, status: 'ready' };
+      });
+      
+      setGeneratedFiles(processedFiles);
+      
     } catch (err) {
-      setError(err.message);
+      console.error('Error generating documents:', err);
+      setError(`Failed to generate documents: ${err.message}`);
     } finally {
       setIsGenerating(false);
     }
   };
   
   const handleDownloadFile = async (filename) => {
-    try {
-      const response = await fetch(`/api/download-document/${filename}`);
-      
-      if (!response.ok) {
-        throw new Error('File not found');
-      }
-      
-      // Create a blob from the file data
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      
-      // Create a temporary link and click it to download
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error downloading file:', error);
-      alert('Failed to download file: ' + error.message);
+    const downloadWindow = window.open(`/api/download-document/${filename}`, '_blank');
+    if (!downloadWindow) {
+      throw new Error('Pop-up blocked or failed to open download window');
     }
+    
+    return new Promise((resolve) => {
+      // We can't perfectly track download completion in a new window
+      // So we'll just resolve after a short timeout
+      setTimeout(resolve, 1000);
+    });
   };
   
   return (
@@ -695,6 +686,7 @@ export default function RealTimeTranscription() {
       {generatedFiles.length > 0 && (
         <div className="mt-4">
           <h3 className="text-lg font-semibold mb-2">Generated Documents</h3>
+          <p className="text-sm text-gray-600 mb-2">Available documents:</p>
           <div className="space-y-2">
             {generatedFiles.map((file, index) => (
               <button
