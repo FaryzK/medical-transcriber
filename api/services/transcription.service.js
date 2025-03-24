@@ -45,9 +45,12 @@ class TranscriptionService {
   /**
    * Initialize a streaming recognition request with Google Speech-to-Text
    * @param {function} callback - Callback function for receiving transcription results
+   * @param {string} language - The language code to use for transcription (e.g., 'en-US', 'cmn-Hans-CN')
    * @returns {object} The streaming recognize object
    */
-  createStreamingRecognitionRequest(callback) {
+  createStreamingRecognitionRequest(callback, language = 'en-US') {
+    console.log(`Creating streaming recognition request for language: ${language}`);
+    
     // If simulation is forcibly disabled and we don't have a speech client, that's an error
     if (this.forceDisableSimulation && !this.speechClient) {
       const errorMsg = 'Real transcription requested but no Google Speech client available';
@@ -65,19 +68,22 @@ class TranscriptionService {
       });
       
       // Fall back to simulation
-      this.recognizeStream = this.createSimulatedRecognizeStream(callback);
+      this.recognizeStream = this.createSimulatedRecognizeStream(callback, language);
       return this.recognizeStream;
     }
     
     console.log('Using real Google Cloud Speech-to-Text service');
     
     try {
+      // Map language codes to the correct format for Google Speech API
+      const languageCode = language === 'zh' ? 'cmn-Hans-CN' : language;
+      
       // Create a recognize stream with proper configuration
       const request = {
         config: {
           encoding: 'WEBM_OPUS',  // Match MediaRecorder format
           sampleRateHertz: 48000, // Standard for most browsers
-          languageCode: 'en-US',
+          languageCode: languageCode,
           enableAutomaticPunctuation: true,
           model: 'default',
           useEnhanced: true,
@@ -117,7 +123,7 @@ class TranscriptionService {
           simulation: true 
         });
         
-        this.recognizeStream = this.createSimulatedRecognizeStream(callback);
+        this.recognizeStream = this.createSimulatedRecognizeStream(callback, language);
         return this.recognizeStream;
       } else {
         callback({ 
@@ -136,13 +142,14 @@ class TranscriptionService {
   /**
    * Create a simulated recognize stream for testing without credentials
    * @param {function} callback - Callback function for receiving transcription results
+   * @param {string} language - The language code to use for simulation
    * @returns {object} A mock stream with write and end methods
    */
-  createSimulatedRecognizeStream(callback) {
-    console.log("Creating simulated transcription service");
+  createSimulatedRecognizeStream(callback, language = 'en-US') {
+    console.log(`Creating simulated transcription service for language: ${language}`);
     
     // Medical phrases to simulate transcription
-    const medicalPhrases = [
+    const englishMedicalPhrases = [
       "Patient presents with fever and cough",
       "Blood pressure 120 over 80",
       "Lungs clear to auscultation bilaterally",
@@ -154,6 +161,24 @@ class TranscriptionService {
       "Follow up appointment scheduled in two weeks",
       "Laboratory results are within normal range"
     ];
+    
+    const mandarinMedicalPhrases = [
+      "病人发烧和咳嗽",
+      "血压120/80",
+      "双侧肺部听诊清晰",
+      "心率正常",
+      "病人否认呼吸困难",
+      "没有呼吸窘迫的迹象",
+      "病人报告疼痛级别4/10",
+      "按医嘱给药",
+      "两周后的随访预约",
+      "检验结果在正常范围内"
+    ];
+    
+    // Select the appropriate phrases based on language
+    const medicalPhrases = language === 'zh' || language === 'cmn-Hans-CN' 
+      ? mandarinMedicalPhrases 
+      : englishMedicalPhrases;
     
     let isActive = true;
     let autoAdvanceTimer = null;
@@ -171,7 +196,7 @@ class TranscriptionService {
             {
               alternatives: [
                 {
-                  transcript: "Processing...",
+                  transcript: language === 'zh' || language === 'cmn-Hans-CN' ? "处理中..." : "Processing...",
                 }
               ],
               isFinal: false

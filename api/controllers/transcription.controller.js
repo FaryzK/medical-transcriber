@@ -18,8 +18,11 @@ export const handleSocketConnection = (socket) => {
     console.log(`Client ${socket.id} ready for transcription. Language: ${data?.language || 'en-US'}`);
     
     try {
+      // Extract language from the data or use English as default
+      const language = data?.language || 'en-US';
+      
       // Use the imported singleton instance
-      // Start the transcription service
+      // Start the transcription service with the selected language
       transcriptionService.createStreamingRecognitionRequest((data) => {
         console.log(`Transcription service response: ${JSON.stringify(data)}`);
         
@@ -46,7 +49,7 @@ export const handleSocketConnection = (socket) => {
           console.log(`Emitting transcription results to client ${socket.id}: ${JSON.stringify(data.results)}`);
           socket.emit('transcription', data);
         }
-      });
+      }, language);
       
       mediaStream = transcriptionService.getRecognizeStream();
       console.log(`Media stream initialized for client ${socket.id}`);

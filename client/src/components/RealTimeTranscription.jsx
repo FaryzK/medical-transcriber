@@ -343,9 +343,10 @@ export default function RealTimeTranscription() {
         >
           <option value="en-US">English (US)</option>
           <option value="zh">Mandarin Chinese</option>
-          <option value="es-ES">Spanish</option>
-          <option value="fr-FR">French</option>
         </select>
+        <p className="mt-1 text-sm text-gray-500">
+          Select the language you'll be speaking before starting the recording.
+        </p>
       </div>
       
       {/* Status indicator */}
