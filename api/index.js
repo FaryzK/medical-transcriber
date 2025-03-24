@@ -9,6 +9,7 @@ import { transcribeFile } from './controllers/fileTranscription.controller.js'
 import { generateDocuments, downloadDocument } from './controllers/document.controller.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import entityRoutes from './routes/entity.routes.js'
 
 dotenv.config()
 
@@ -38,6 +39,9 @@ app.post('/api/transcribe-file', transcribeFile)
 // Document generation and download endpoints
 app.post('/api/generate-documents', generateDocuments)
 app.get('/api/download-document/:filename', downloadDocument)
+
+// Register entity routes
+app.use('/api', entityRoutes)
 
 // Logging middleware for Socket.IO
 io.use((socket, next) => {

@@ -1,4 +1,5 @@
 import fileTranscriptionService from '../services/fileTranscription.service.js';
+import entityService from '../services/entity.service.js';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -56,6 +57,16 @@ const upload = multer({
 });
 
 /**
+ * Helper function to get combined text from transcription results
+ */
+const getCombinedTranscription = (results) => {
+  return results
+    .sort((a, b) => b.confidence - a.confidence) // Sort by confidence score
+    .map(result => result.transcript)
+    .join(' ');
+};
+
+/**
  * Handle file upload and transcription
  * @param {object} req - Express request object
  * @param {object} res - Express response object
@@ -89,13 +100,37 @@ export const transcribeFile = async (req, res) => {
         console.log(`Processing file: ${req.file.path} in language: ${language}`);
 
         // Transcribe the file
-        const result = await fileTranscriptionService.transcribeFile(req.file.path, language);
+        const transcriptionResult = await fileTranscriptionService.transcribeFile(req.file.path, language);
 
         // Clean up the uploaded file
         await fileTranscriptionService.cleanup(req.file.path);
 
-        // Return the transcription results
-        res.json(result);
+        // If transcription was successful, extract entities
+        if (transcriptionResult.success && transcriptionResult.results && transcriptionResult.results.length > 0) {
+          try {
+            // Combine all transcription results into a single text
+            const combinedText = getCombinedTranscription(transcriptionResult.results);
+            console.log(`Extracting entities from combined text (${combinedText.length} chars)`);
+            
+            // Extract entities from the combined text
+            const entityResult = await entityService.extractEntities(combinedText);
+            
+            // Add entities to the response
+            if (entityResult && entityResult.entities) {
+              console.log(`Found ${entityResult.entities.length} entities in the transcription`);
+              transcriptionResult.entities = entityResult.entities;
+            } else {
+              console.log('No entities found in the transcription');
+              transcriptionResult.entities = [];
+            }
+          } catch (entityError) {
+            console.error('Error extracting entities:', entityError);
+            transcriptionResult.entities = [];
+          }
+        }
+
+        // Return the transcription results with entities
+        res.json(transcriptionResult);
 
       } catch (error) {
         console.error('Error processing file:', error);
