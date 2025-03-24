@@ -270,9 +270,24 @@ export function setupTranscriptionSocket(namespace) {
       try {
         console.log(`Client ${socket.id} ready for transcription in language: ${language}`);
         
-        // Generate a unique session ID
-        sessionId = `session_${Date.now()}_${socket.id}`;
-        console.log(`Created session ID: ${sessionId}`);
+        // Clean up any existing stream first
+        if (recognizeStream) {
+          console.log(`Cleaning up existing stream for session ${sessionId}`);
+          try {
+            recognizeStream.end();
+          } catch (err) {
+            console.log(`Non-critical error ending existing stream: ${err.message}`);
+          }
+          recognizeStream = null;
+        }
+        
+        // Generate a unique session ID or reuse existing one
+        if (!sessionId) {
+          sessionId = `session_${Date.now()}_${socket.id}`;
+          console.log(`Created new session ID: ${sessionId}`);
+        } else {
+          console.log(`Reusing existing session ID: ${sessionId}`);
+        }
         
         // Initialize transcription stream
         recognizeStream = transcriptionService.createStreamingRecognitionRequest((data) => {
@@ -315,7 +330,7 @@ export function setupTranscriptionSocket(namespace) {
           }
         }, language);
         
-        // Store session information
+        // Store or update session information
         activeSessions.set(sessionId, {
           socket,
           recognizeStream,
@@ -344,7 +359,13 @@ export function setupTranscriptionSocket(namespace) {
     socket.on('audioData', async (audioData) => {
       try {
         if (!recognizeStream) {
-          socket.emit('error', { message: 'No active transcription stream available' });
+          // This is a normal condition when stopping, so don't emit an error
+          console.log(`Client ${socket.id} sent audio data but no active stream`);
+          return;
+        }
+        
+        // Skip processing if the stream is being stopped
+        if (recognizeStream.stopping) {
           return;
         }
         
@@ -356,8 +377,9 @@ export function setupTranscriptionSocket(namespace) {
           socket.emit('error', { message: 'Invalid audio data format' });
         }
       } catch (error) {
+        // Only log, don't emit error back to client for audio data issues
+        // as this can happen during normal shutdown sequence
         console.error('Error processing audio data:', error);
-        socket.emit('error', { message: 'Failed to process audio data: ' + error.message });
       }
     });
     
@@ -367,11 +389,22 @@ export function setupTranscriptionSocket(namespace) {
         console.log(`Client ${socket.id} stopped transcription`);
         
         if (recognizeStream) {
-          recognizeStream.end();
+          // Mark as stopping to prevent other operations during shutdown
+          recognizeStream.stopping = true;
+          
+          // Use try-catch specifically for the end() call
+          try {
+            recognizeStream.end();
+          } catch (streamError) {
+            console.log(`Non-critical error ending stream: ${streamError.message}`);
+            // Continue with cleanup even if end() fails
+          }
+          
           recognizeStream = null;
         }
         
-        socket.emit('transcriptionStopped');
+        // Emit stopped event to client (renamed from transcriptionStopped for consistency)
+        socket.emit('stopped', { message: 'Transcription stopped successfully' });
         
         // Clean up session
         if (sessionId) {
@@ -385,6 +418,8 @@ export function setupTranscriptionSocket(namespace) {
       } catch (error) {
         console.error('Error stopping transcription:', error);
         socket.emit('error', { message: 'Failed to stop transcription: ' + error.message });
+        // Still emit stopped event to prevent client from waiting indefinitely
+        socket.emit('stopped', { message: 'Transcription stopped with errors' });
       }
     });
     
@@ -450,7 +485,7 @@ async function processEntities(newText, fullText, startPosition, socket) {
           console.error('Error emitting entities to client:', emitError);
         }
       } else {
-        console.warn('Cannot send entities - socket disconnected');
+        console.log('No entities extracted from text');
       }
     } else {
       console.log('No entities extracted from text');

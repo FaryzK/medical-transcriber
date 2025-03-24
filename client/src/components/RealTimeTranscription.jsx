@@ -18,6 +18,8 @@ export default function RealTimeTranscription() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [entities, setEntities] = useState([]);
   const [confirmedText, setConfirmedText] = useState('');
+  const [showTranscriptionModal, setShowTranscriptionModal] = useState(false);
+  const [isPendingRecording, setIsPendingRecording] = useState(false);
   
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -304,6 +306,39 @@ export default function RealTimeTranscription() {
       setError(null);
       addDebug('Starting recording...');
       
+      // If we already have transcription, show modal to continue or start new
+      if (transcription) {
+        setIsPendingRecording(true);
+        setShowTranscriptionModal(true);
+        return; // Wait for user response via modal
+      }
+      
+      // Otherwise, proceed with starting new recording
+      await initializeRecording(false);
+      
+    } catch (error) {
+      addDebug(`Error starting recording: ${error.message}`);
+      setError(`Could not start recording: ${error.message}`);
+      setIsRecording(false);
+      setConnectionStatus('error');
+      setIsPendingRecording(false);
+    }
+  };
+  
+  // New function to handle the actual recording initialization
+  const initializeRecording = async (continueExisting) => {
+    try {
+      if (!continueExisting) {
+        // Clear existing transcription to start fresh
+        setTranscription('');
+        setInterimTranscription('');
+        setConfirmedText('');
+        setEntities([]);
+        addDebug('Starting new transcription, cleared previous data');
+      } else {
+        addDebug('Continuing with existing transcription');
+      }
+      
       if (!socketRef.current || !socketRef.current.connected) {
         addDebug('Socket not connected. Connecting...');
         socketRef.current = connectSocket();
@@ -326,10 +361,22 @@ export default function RealTimeTranscription() {
             }
           }, 10000);
         });
+      } else {
+        // If socket exists but we need to re-initialize the transcription
+        addDebug('Re-initializing transcription service');
+        socketRef.current.emit('ready', { language }, (response) => {
+          if (response?.status === 'success') {
+            addDebug('Transcription service re-initialized');
+            setSimulationMode(response.simulation || false);
+          } else if (response?.status === 'error') {
+            addDebug(`Error re-initializing transcription: ${response.message}`);
+            setError(`Failed to re-initialize transcription: ${response.message}`);
+            setConnectionStatus('error');
+          }
+        });
       }
       
       setIsRecording(true);
-      setInterimTranscription('');
       
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -394,12 +441,11 @@ export default function RealTimeTranscription() {
       // Start recording with small time slices for real-time transcription
       recorder.start(250);
       addDebug('Recorder started with 250ms time slices');
+      setIsPendingRecording(false);
       
     } catch (error) {
-      addDebug(`Error starting recording: ${error.message}`);
-      setError(`Could not start recording: ${error.message}`);
-      setIsRecording(false);
-      setConnectionStatus('error');
+      setIsPendingRecording(false);
+      throw error; // Rethrow to be caught by the caller
     }
   };
   
@@ -551,6 +597,57 @@ export default function RealTimeTranscription() {
     });
   };
   
+  // Custom modal component for the transcription choice
+  const TranscriptionModal = () => {
+    if (!showTranscriptionModal) return null;
+    
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-xl w-full max-w-md overflow-hidden">
+          <div className="p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Continue Transcription?</h3>
+            <p className="text-gray-600 mb-4">
+              You already have existing transcription text. Would you like to continue with the current text or start a new transcription?
+            </p>
+            <div className="flex flex-col space-y-2">
+              <button
+                onClick={() => {
+                  setShowTranscriptionModal(false);
+                  initializeRecording(true).catch(error => {
+                    setError(`Failed to start recording: ${error.message}`);
+                  });
+                }}
+                className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md"
+              >
+                Continue Current Transcription
+              </button>
+              <button
+                onClick={() => {
+                  setShowTranscriptionModal(false);
+                  initializeRecording(false).catch(error => {
+                    setError(`Failed to start recording: ${error.message}`);
+                  });
+                }}
+                className="w-full py-2 px-4 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-md"
+              >
+                Start New Transcription
+              </button>
+              <button
+                onClick={() => {
+                  setShowTranscriptionModal(false);
+                  setIsPendingRecording(false);
+                }}
+                className="w-full py-2 px-4 text-gray-500 hover:text-gray-700 text-sm font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="p-4 space-y-4 bg-white rounded-lg shadow-md">
       <h2 className="text-xl font-semibold text-gray-800">Real-time Transcription</h2>
@@ -561,6 +658,9 @@ export default function RealTimeTranscription() {
           <p className="text-xs">Transcriptions are simulated for demonstration purposes</p>
         </div>
       )}
+      
+      {/* Modal for transcription choice */}
+      <TranscriptionModal />
       
       {/* Language selector */}
       <div className="mb-4">
@@ -642,13 +742,16 @@ export default function RealTimeTranscription() {
       <div className="flex space-x-3 mb-4">
         <button
           onClick={toggleRecording}
+          disabled={isPendingRecording}
           className={`px-4 py-2 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
             isRecording
               ? 'bg-red-600 text-white hover:bg-red-700'
+              : isPendingRecording
+              ? 'bg-gray-400 text-white cursor-wait'
               : 'bg-blue-600 text-white hover:bg-blue-700'
           } focus:ring-blue-500`}
         >
-          {isRecording ? 'Stop Recording' : 'Start Recording'}
+          {isRecording ? 'Stop Recording' : isPendingRecording ? 'Starting...' : 'Start Recording'}
         </button>
 
         <button
@@ -665,9 +768,9 @@ export default function RealTimeTranscription() {
 
         <button
           onClick={handleGenerateDocuments}
-          disabled={!transcription || isRecording || isGenerating}
+          disabled={!transcription || isRecording || isGenerating || isPendingRecording}
           className={`px-4 py-2 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-            !transcription || isRecording || isGenerating
+            !transcription || isRecording || isGenerating || isPendingRecording
               ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
               : 'bg-green-600 text-white hover:bg-green-700'
           } focus:ring-green-500`}
