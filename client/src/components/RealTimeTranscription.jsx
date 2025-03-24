@@ -12,6 +12,7 @@ export default function RealTimeTranscription() {
   const [debugInfo, setDebugInfo] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [generatedFiles, setGeneratedFiles] = useState([]);
   
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -347,6 +348,66 @@ export default function RealTimeTranscription() {
     setDebugInfo('');
   };
   
+  const handleGenerateDocuments = async () => {
+    if (!transcription) {
+      setError('No transcription available to generate documents');
+      return;
+    }
+
+    try {
+      addDebug('Generating documents...');
+      const response = await fetch('/api/generate-documents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: transcription,
+          language: language
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to generate documents');
+      }
+
+      setGeneratedFiles(data.files);
+      addDebug('Documents generated and download initiated');
+    } catch (error) {
+      console.error('Error generating documents:', error);
+      addDebug(`Document generation error: ${error.message}`);
+      setError(`Failed to generate documents: ${error.message}`);
+    }
+  };
+  
+  const handleDownloadFile = async (filename) => {
+    try {
+      const response = await fetch(`/api/download-document/${filename}`);
+      
+      if (!response.ok) {
+        throw new Error('File not found');
+      }
+      
+      // Create a blob from the file data
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      
+      // Create a temporary link and click it to download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      alert('Failed to download file: ' + error.message);
+    }
+  };
+  
   return (
     <div className="p-4 space-y-4 bg-white rounded-lg shadow-md">
       <h2 className="text-xl font-semibold text-gray-800">Real-time Transcription</h2>
@@ -426,27 +487,76 @@ export default function RealTimeTranscription() {
       </div>
       
       {/* Controls */}
-      <div className="flex space-x-3 mt-4">
+      <div className="flex space-x-3 mb-4">
         <button
           onClick={toggleRecording}
           className={`px-4 py-2 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
             isRecording
-              ? 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500'
-              : 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500'
-          }`}
-          disabled={connectionStatus === 'error'}
+              ? 'bg-red-600 text-white hover:bg-red-700'
+              : 'bg-blue-600 text-white hover:bg-blue-700'
+          } focus:ring-blue-500`}
         >
           {isRecording ? 'Stop Recording' : 'Start Recording'}
         </button>
-        
+
         <button
           onClick={handleClearTranscription}
-          className="px-4 py-2 bg-gray-200 text-gray-800 font-medium rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-          disabled={isRecording}
+          disabled={!transcription && !interimTranscription}
+          className={`px-4 py-2 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+            !transcription && !interimTranscription
+              ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+              : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+          } focus:ring-gray-500`}
         >
-          Clear
+          Clear Results
+        </button>
+
+        <button
+          onClick={handleGenerateDocuments}
+          disabled={!transcription || isRecording}
+          className={`px-4 py-2 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+            !transcription || isRecording
+              ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+              : 'bg-green-600 text-white hover:bg-green-700'
+          } focus:ring-green-500`}
+        >
+          Generate Documents
         </button>
       </div>
+      
+      {generatedFiles.length > 0 && (
+        <div className="mt-4">
+          <h3 className="text-lg font-semibold mb-2">Generated Documents</h3>
+          <div className="space-y-2">
+            {generatedFiles.map((file, index) => (
+              <button
+                key={index}
+                onClick={() => handleDownloadFile(file.filename)}
+                className="block w-full text-left px-4 py-2 bg-white hover:bg-gray-50 border rounded-md shadow-sm group"
+              >
+                <div className="flex items-center space-x-2">
+                  <svg 
+                    className="w-5 h-5 text-gray-500 group-hover:text-gray-700" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round" 
+                      strokeWidth={2} 
+                      d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" 
+                    />
+                  </svg>
+                  <span className="text-blue-600 group-hover:text-blue-800 underline">
+                    {file.filename}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       
       <div className="text-xs text-gray-500 mt-2">
         <p>Speak clearly into your microphone. Transcription may take a moment to process.</p>

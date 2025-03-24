@@ -6,6 +6,7 @@ import { Server } from 'socket.io'
 import testRoute from './routes/test.route.js'
 import { handleSocketConnection } from './controllers/transcription.controller.js'
 import { transcribeFile } from './controllers/fileTranscription.controller.js'
+import { generateDocuments, downloadDocument } from './controllers/document.controller.js'
 
 dotenv.config()
 
@@ -31,6 +32,10 @@ app.use('/api', testRoute)
 
 // File transcription endpoint
 app.post('/api/transcribe-file', transcribeFile)
+
+// Document generation and download endpoints
+app.post('/api/generate-documents', generateDocuments)
+app.get('/api/download-document/:filename', downloadDocument)
 
 // Logging middleware for Socket.IO
 io.use((socket, next) => {

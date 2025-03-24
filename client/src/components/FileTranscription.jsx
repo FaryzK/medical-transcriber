@@ -8,6 +8,7 @@ export default function FileTranscription() {
   const [transcriptionResults, setTranscriptionResults] = useState([]);
   const [showConfidence, setShowConfidence] = useState(false);
   const fileInputRef = useRef(null);
+  const [generatedFiles, setGeneratedFiles] = useState([]);
 
   const handleFileChange = (event) => {
     const selectedFile = event.target.files[0];
@@ -116,6 +117,60 @@ export default function FileTranscription() {
     });
   };
 
+  const handleGenerateDocuments = async () => {
+    if (!transcriptionResults) return;
+
+    try {
+      const combinedText = getCombinedTranscription();
+      const response = await fetch('/api/generate-documents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: combinedText,
+          language: language
+        }),
+      });
+
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to generate documents');
+      }
+
+      setGeneratedFiles(data.files);
+    } catch (error) {
+      console.error('Error generating documents:', error);
+      alert('Failed to generate documents: ' + error.message);
+    }
+  };
+
+  const handleDownloadFile = async (filename) => {
+    try {
+      const response = await fetch(`/api/download-document/${filename}`);
+      
+      if (!response.ok) {
+        throw new Error('File not found');
+      }
+      
+      // Create a blob from the file data
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      
+      // Create a temporary link and click it to download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      alert('Failed to download file: ' + error.message);
+    }
+  };
+
   return (
     <div className="p-4 space-y-4 bg-white rounded-lg shadow-md">
       <h2 className="text-xl font-semibold text-gray-800">Audio File Transcription</h2>
@@ -171,7 +226,7 @@ export default function FileTranscription() {
           </div>
         )}
 
-        {/* Submit button */}
+        {/* Submit and control buttons */}
         <div className="flex space-x-3">
           <button
             type="submit"
@@ -185,24 +240,31 @@ export default function FileTranscription() {
             {isProcessing ? 'Processing...' : 'Transcribe'}
           </button>
 
-          {transcriptionResults.length > 0 && (
-            <>
-              <button
-                type="button"
-                onClick={handleClear}
-                className="px-4 py-2 bg-gray-200 text-gray-800 font-medium rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-              >
-                Clear Results
-              </button>
-              <button
-                type="button"
-                onClick={handleCopyTranscription}
-                className="px-4 py-2 bg-green-100 text-green-800 font-medium rounded-md hover:bg-green-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-              >
-                Copy Text
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={!transcriptionResults.length}
+            className={`px-4 py-2 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              !transcriptionResults.length
+                ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+            } focus:ring-gray-500`}
+          >
+            Clear Results
+          </button>
+
+          <button
+            type="button"
+            onClick={handleGenerateDocuments}
+            disabled={!transcriptionResults.length || isProcessing}
+            className={`px-4 py-2 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              !transcriptionResults.length || isProcessing
+                ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                : 'bg-green-600 text-white hover:bg-green-700'
+            } focus:ring-green-500`}
+          >
+            Generate Documents
+          </button>
         </div>
       </form>
 
@@ -250,6 +312,40 @@ export default function FileTranscription() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {generatedFiles.length > 0 && (
+        <div className="mt-4">
+          <h3 className="text-lg font-semibold mb-2">Generated Documents</h3>
+          <div className="space-y-2">
+            {generatedFiles.map((file, index) => (
+              <button
+                key={index}
+                onClick={() => handleDownloadFile(file.filename)}
+                className="block w-full text-left px-4 py-2 bg-white hover:bg-gray-50 border rounded-md shadow-sm group"
+              >
+                <div className="flex items-center space-x-2">
+                  <svg 
+                    className="w-5 h-5 text-gray-500 group-hover:text-gray-700" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round" 
+                      strokeWidth={2} 
+                      d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" 
+                    />
+                  </svg>
+                  <span className="text-blue-600 group-hover:text-blue-800 underline">
+                    {file.filename}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
