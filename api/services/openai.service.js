@@ -43,7 +43,7 @@ class OpenAIService {
         messages: [
           {
             role: "system",
-            content: `You are a dental documentation assistant specializing in identifying areas in transcriptions that need more context. 
+            content: `You are a medical documentation assistant specializing in identifying areas in medical transcriptions that need more context. 
 
             Focus on the following context types:
             ${contextTypesDescription}
@@ -64,7 +64,7 @@ class OpenAIService {
             content: text
           }
         ],
-        temperature: 0.7,
+        temperature: 0,
         max_tokens: 1500
       });
 

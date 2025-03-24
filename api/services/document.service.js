@@ -1,6 +1,7 @@
-import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, BorderStyle } from 'docx';
+import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, BorderStyle, HeadingLevel } from 'docx';
 import { TranslationServiceClient } from '@google-cloud/translate';
 import openaiService from './openai.service.js';
+import soapService from './soap.service.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -165,12 +166,19 @@ class DocumentService {
         );
         files.push(englishFile);
 
-        // Generate context analysis document for English transcriptions
+        // Generate context analysis document
         const analysisFile = await this.generateContextAnalysisDocument(
           text,
           'Context Analysis'
         );
         files.push(analysisFile);
+
+        // Generate SOAP notes document
+        const soapFile = await this.generateSOAPDocument(
+          text,
+          'SOAP Notes'
+        );
+        files.push(soapFile);
       }
 
       return files;
@@ -289,6 +297,123 @@ class DocumentService {
       return filepath;
     } catch (error) {
       console.error('Error generating context analysis document:', error);
+      throw error;
+    }
+  }
+
+  async generateSOAPDocument(text, title) {
+    try {
+      // First get the context analysis
+      const analysis = await openaiService.analyzeTranscription(text);
+      
+      // Then format it into SOAP notes
+      const soapNotes = await soapService.formatToSOAP(analysis.annotatedText);
+      
+      const doc = new Document({
+        sections: [{
+          properties: {},
+          children: [
+            new Paragraph({
+              text: title,
+              heading: HeadingLevel.HEADING_1
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: new Date().toLocaleString(),
+                  size: 24,
+                  italic: true
+                })
+              ]
+            }),
+            new Paragraph({}), // Spacing
+            // Subjective Section
+            new Paragraph({
+              text: "SUBJECTIVE",
+              heading: HeadingLevel.HEADING_2
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: soapNotes.subjective,
+                  size: 24
+                })
+              ]
+            }),
+            new Paragraph({}), // Spacing
+            // Objective Section
+            new Paragraph({
+              text: "OBJECTIVE",
+              heading: HeadingLevel.HEADING_2
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: soapNotes.objective,
+                  size: 24
+                })
+              ]
+            }),
+            new Paragraph({}), // Spacing
+            // Assessment Section
+            new Paragraph({
+              text: "ASSESSMENT",
+              heading: HeadingLevel.HEADING_2
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: soapNotes.assessment,
+                  size: 24
+                })
+              ]
+            }),
+            new Paragraph({}), // Spacing
+            // Plan Section
+            new Paragraph({
+              text: "PLAN",
+              heading: HeadingLevel.HEADING_2
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: soapNotes.plan,
+                  size: 24
+                })
+              ]
+            })
+          ]
+        }]
+      });
+
+      // Create documents directory if it doesn't exist
+      const docsDir = path.join(__dirname, '../documents');
+      if (!fs.existsSync(docsDir)) {
+        fs.mkdirSync(docsDir, { recursive: true });
+      }
+
+      const now = new Date();
+      const date = now.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      }).replace(/\//g, '-');
+      
+      const time = now.toLocaleTimeString('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).replace(':', '');
+
+      const filename = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${date}_${time}.docx`;
+      const filepath = path.join(docsDir, filename);
+
+      const buffer = await Packer.toBuffer(doc);
+      fs.writeFileSync(filepath, buffer);
+
+      return filepath;
+    } catch (error) {
+      console.error('Error generating SOAP document:', error);
       throw error;
     }
   }
