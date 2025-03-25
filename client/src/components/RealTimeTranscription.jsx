@@ -20,10 +20,13 @@ export default function RealTimeTranscription() {
   const [confirmedText, setConfirmedText] = useState('');
   const [showTranscriptionModal, setShowTranscriptionModal] = useState(false);
   const [isPendingRecording, setIsPendingRecording] = useState(false);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
+  const transcriptionContainerRef = useRef(null);
+  const userHasScrolledRef = useRef(false);
   
   // Connect to the WebSocket server when component mounts
   useEffect(() => {
@@ -44,6 +47,36 @@ export default function RealTimeTranscription() {
       }
     };
   }, []);
+  
+  // Add scroll event listener to detect manual scrolling
+  useEffect(() => {
+    const container = transcriptionContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      if (!isRecording) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isAtBottom = Math.abs(scrollHeight - clientHeight - scrollTop) < 50;
+      
+      if (!isAtBottom && !userHasScrolledRef.current) {
+        // User has scrolled up during recording
+        userHasScrolledRef.current = true;
+        setShouldAutoScroll(false);
+      }
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [isRecording]);
+
+  // Auto-scroll effect
+  useEffect(() => {
+    if (shouldAutoScroll && transcriptionContainerRef.current) {
+      const container = transcriptionContainerRef.current;
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [transcription, interimTranscription, shouldAutoScroll]);
   
   // Function to format text with entities
   const formatTextWithEntities = (text, entities) => {
@@ -338,6 +371,10 @@ export default function RealTimeTranscription() {
       } else {
         addDebug('Continuing with existing transcription');
       }
+      
+      // Reset auto-scroll state
+      setShouldAutoScroll(true);
+      userHasScrolledRef.current = false;
       
       if (!socketRef.current || !socketRef.current.connected) {
         addDebug('Socket not connected. Connecting...');
@@ -715,7 +752,10 @@ export default function RealTimeTranscription() {
       
       {/* Transcription output */}
       <div className="mt-4">
-        <div className="p-3 bg-gray-50 rounded-md min-h-[100px] max-h-[300px] overflow-y-auto border border-gray-200">
+        <div 
+          ref={transcriptionContainerRef}
+          className="p-3 bg-gray-50 rounded-md min-h-[100px] max-h-[300px] overflow-y-auto border border-gray-200 relative"
+        >
           {!transcription && !interimTranscription && !isRecording ? (
             <p className="text-gray-400 italic">Transcription will appear here...</p>
           ) : (
@@ -727,6 +767,21 @@ export default function RealTimeTranscription() {
                 }} 
               />
             </div>
+          )}
+          {!shouldAutoScroll && isRecording && (
+            <button
+              onClick={() => {
+                setShouldAutoScroll(true);
+                userHasScrolledRef.current = false;
+                const container = transcriptionContainerRef.current;
+                if (container) {
+                  container.scrollTop = container.scrollHeight;
+                }
+              }}
+              className="absolute bottom-2 right-2 bg-blue-500 text-white text-xs px-2 py-1 rounded-full shadow-md hover:bg-blue-600 transition-colors"
+            >
+              Resume Auto-scroll
+            </button>
           )}
         </div>
         <div className="mt-2 text-xs text-gray-500 flex flex-wrap gap-4">
