@@ -554,7 +554,7 @@ export default function FileTranscription() {
         <div className="mt-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-medium text-gray-800">Transcription Results</h3>
-            <div className="flex items-center gap-4">
+            {/* <div className="flex items-center gap-4">
               <button
                 type="button"
                 onClick={handleCopyTranscription}
@@ -569,7 +569,7 @@ export default function FileTranscription() {
               >
                 {showConfidence ? 'Hide Confidence Scores' : 'Show Confidence Scores'}
               </button>
-            </div>
+            </div> */}
           </div>
 
           {/* Formatted transcription view - only show the formatted version */}

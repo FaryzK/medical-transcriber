@@ -829,7 +829,7 @@ export default function RealTimeTranscription() {
       </div>
       
       {/* Debug Information Section */}
-      <div className="mt-6 p-2 border border-gray-200 rounded">
+      {/* <div className="mt-6 p-2 border border-gray-200 rounded">
         <div className="flex justify-between items-center mb-2">
           <h3 className="text-sm font-medium text-gray-700">Debug Information</h3>
           <button 
@@ -842,7 +842,7 @@ export default function RealTimeTranscription() {
         <pre className="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-[150px] whitespace-pre-wrap">
           {debugInfo || 'No debug information available'}
         </pre>
-      </div>
+      </div> */}
     </div>
   );
 } 
