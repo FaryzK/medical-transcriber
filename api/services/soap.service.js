@@ -9,6 +9,16 @@ class SOAPService {
 
   async formatToSOAP(text) {
     try {
+      // Input validation
+      if (!text || typeof text !== 'string' || text.trim().length < 10) {
+        return {
+          subjective: "Insufficient information for SOAP note generation",
+          objective: "Text provided is too short or lacks medical context",
+          assessment: "Unable to assess with limited information",
+          plan: "Please provide more detailed medical information for proper SOAP note generation"
+        };
+      }
+
       const response = await this.openai.chat.completions.create({
         model: "gpt-4",
         messages: [
@@ -51,6 +61,7 @@ class SOAPService {
             4. If information for a section is not available, note "No information provided"
             5. Maintain all medical terminology intact
             6. Keep context requests (e.g., [NEEDS_CONTEXT]) exactly where they appear in the original text
+            7. If the input text is not medical in nature or lacks sufficient information, provide appropriate messages indicating the limitations.
 
             Return the formatted notes as a JSON object with sections as keys:
             {
@@ -69,7 +80,22 @@ class SOAPService {
         max_tokens: 2000
       });
 
-      return JSON.parse(response.choices[0].message.content);
+      const content = response.choices[0].message.content;
+      
+      try {
+        return JSON.parse(content);
+      } catch (parseError) {
+        console.error('Error parsing GPT response:', parseError);
+        console.log('Raw GPT response:', content);
+        
+        // Fallback response for parsing errors
+        return {
+          subjective: "Error formatting SOAP notes - Unable to process the transcription",
+          objective: "System encountered an error while formatting the notes",
+          assessment: "Please review the original transcription text",
+          plan: "Consider providing more detailed or clearer medical information"
+        };
+      }
     } catch (error) {
       console.error('Error formatting SOAP notes:', error);
       throw new Error('Failed to format SOAP notes');

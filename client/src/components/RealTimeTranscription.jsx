@@ -622,16 +622,28 @@ export default function RealTimeTranscription() {
   };
   
   const handleDownloadFile = async (filename) => {
-    const downloadWindow = window.open(`/api/download-document/${filename}`, '_blank');
-    if (!downloadWindow) {
-      throw new Error('Pop-up blocked or failed to open download window');
+    try {
+      // Create a hidden anchor element
+      const link = document.createElement('a');
+      link.href = `/api/download-document/${filename}`;
+      link.download = filename; // Suggest the filename to save as
+      link.style.display = 'none';
+      document.body.appendChild(link);
+
+      // Trigger the download
+      link.click();
+
+      // Clean up
+      setTimeout(() => {
+        document.body.removeChild(link);
+      }, 100);
+
+      return Promise.resolve();
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      setError(`Failed to download file: ${error.message}`);
+      return Promise.reject(error);
     }
-    
-    return new Promise((resolve) => {
-      // We can't perfectly track download completion in a new window
-      // So we'll just resolve after a short timeout
-      setTimeout(resolve, 1000);
-    });
   };
   
   // Custom modal component for the transcription choice
