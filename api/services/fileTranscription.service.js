@@ -105,8 +105,11 @@ class FileTranscriptionService {
   async convertToMono(inputPath) {
     const outputPath = inputPath.replace(/\.[^/.]+$/, '') + '_mono.wav';
     try {
-      // Log original file size
+      // Log original file size and format
       const originalSize = fs.statSync(inputPath).size;
+      const fileExtension = path.extname(inputPath).toLowerCase();
+      console.log(`Original file: ${inputPath}`);
+      console.log(`File extension: ${fileExtension}`);
       console.log(`Original file size: ${originalSize} bytes (${(originalSize / 1024 / 1024).toFixed(2)} MB)`);
       
       // Convert to mono WAV format with 16kHz sample rate and compression
@@ -116,7 +119,7 @@ class FileTranscriptionService {
       const convertedSize = fs.statSync(outputPath).size;
       console.log(`Converted file size: ${convertedSize} bytes (${(convertedSize / 1024 / 1024).toFixed(2)} MB)`);
       
-      console.log(`Successfully converted ${inputPath} to mono`);
+      console.log(`Successfully converted ${inputPath} to mono WAV format`);
       return outputPath;
     } catch (error) {
       console.error('Error converting audio to mono:', error);

@@ -30,9 +30,12 @@ export default function FileTranscription() {
                     fileType.includes('audio/wave') || 
                     fileType.includes('audio/x-wav') ||
                     fileName.endsWith('.wav');
+      const isMPEG = fileType.includes('audio/mpeg') || 
+                     fileName.endsWith('.mpeg') || 
+                     fileName.endsWith('.mpg');
 
-      if (!isMP3 && !isWAV) {
-        setError('Please select an MP3 or WAV file');
+      if (!isMP3 && !isWAV && !isMPEG) {
+        setError('Please select an MP3, WAV, or MPEG file');
         setFile(null);
         event.target.value = null;
         return;
@@ -475,13 +478,13 @@ export default function FileTranscription() {
         {/* File input */}
         <div>
           <label htmlFor="audioFile" className="block text-sm font-medium text-gray-700">
-            Audio File (MP3 or WAV, max 10MB)
+            Audio File (MP3, WAV, or MPEG, max 10MB)
           </label>
           <input
             type="file"
             id="audioFile"
             ref={fileInputRef}
-            accept=".mp3,.wav"
+            accept=".mp3,.wav,.mpeg"
             onChange={handleFileChange}
             className="mt-1 block w-full text-sm text-gray-500
               file:mr-4 file:py-2 file:px-4

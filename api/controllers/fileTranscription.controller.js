@@ -28,10 +28,11 @@ const storage = multer.diskStorage({
 
 // File filter to only allow mp3 and wav files
 const fileFilter = (req, file, cb) => {
-  const allowedExtensions = ['.mp3', '.wav'];
+  const allowedExtensions = ['.mp3', '.wav', '.mpeg', '.mpg'];
   const allowedMimeTypes = [
     'audio/mp3',
     'audio/mpeg',
+    'video/mpeg',
     'audio/wav',
     'audio/wave',
     'audio/x-wav'
@@ -44,7 +45,7 @@ const fileFilter = (req, file, cb) => {
   if (isValidExtension || isValidMimeType) {
     cb(null, true);
   } else {
-    cb(new Error(`Invalid file type. Only MP3 and WAV files are allowed. Got mimetype: ${file.mimetype}, extension: ${ext}`));
+    cb(new Error(`Invalid file type. Only MP3, WAV, and MPEG files are allowed. Got mimetype: ${file.mimetype}, extension: ${ext}`));
   }
 };
 
