@@ -1,4 +1,5 @@
 import { SpeechClient } from '@google-cloud/speech';
+import { Storage } from '@google-cloud/storage';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -12,33 +13,87 @@ dotenv.config();
 class FileTranscriptionService {
   constructor() {
     try {
-      // If credentials are provided directly in the environment variable
+      // Initialize both Speech and Storage clients
       if (process.env.GOOGLE_CLOUD_CREDENTIALS) {
         console.log('Using Google Cloud credentials from environment variable');
         try {
           const credentials = JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS);
           this.speechClient = new SpeechClient({ credentials });
-          console.log('Successfully initialized Google Speech client for file transcription');
+          this.storageClient = new Storage({ credentials });
+          console.log('Successfully initialized Google clients');
         } catch (parseError) {
           console.error('Error parsing GOOGLE_CLOUD_CREDENTIALS:', parseError);
           console.log('Falling back to credentials file path');
           this.speechClient = new SpeechClient();
+          this.storageClient = new Storage();
         }
       } 
-      // If credentials are provided as a file path
       else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
         console.log('Using Google Cloud credentials from file path');
         this.speechClient = new SpeechClient();
-        console.log('Successfully initialized Google Speech client for file transcription');
+        this.storageClient = new Storage();
+        console.log('Successfully initialized Google clients');
       } 
-      // No valid credentials found
       else {
         console.warn('No Google Cloud credentials found. File transcription will not work properly.');
         this.speechClient = null;
+        this.storageClient = null;
       }
     } catch (error) {
-      console.error('Error initializing Google Speech client:', error);
+      console.error('Error initializing Google clients:', error);
       this.speechClient = null;
+      this.storageClient = null;
+    }
+  }
+
+  /**
+   * Upload file to Google Cloud Storage
+   * @param {string} filePath - Path to the file to upload
+   * @returns {Promise<string>} GCS URI
+   */
+  async uploadToGCS(filePath) {
+    if (!this.storageClient) {
+      throw new Error('Storage client not initialized');
+    }
+
+    const bucketName = process.env.GCS_BUCKET_NAME;
+    if (!bucketName) {
+      throw new Error('GCS_BUCKET_NAME environment variable not set');
+    }
+
+    const fileName = path.basename(filePath);
+    const gcsFileName = `transcription/${Date.now()}-${fileName}`;
+
+    await this.storageClient.bucket(bucketName).upload(filePath, {
+      destination: gcsFileName,
+      metadata: {
+        contentType: 'audio/wav'
+      }
+    });
+
+    return `gs://${bucketName}/${gcsFileName}`;
+  }
+
+  /**
+   * Delete file from Google Cloud Storage
+   * @param {string} gcsUri - GCS URI of the file to delete
+   */
+  async deleteFromGCS(gcsUri) {
+    if (!this.storageClient) return;
+
+    const bucketName = process.env.GCS_BUCKET_NAME;
+    if (!bucketName) return;
+
+    // Extract the full path from the GCS URI (everything after bucket name)
+    const fileName = gcsUri.split(`${bucketName}/`)[1];
+    if (!fileName) return;
+
+    try {
+      await this.storageClient.bucket(bucketName).file(fileName).delete();
+      console.log(`Successfully deleted file from GCS: ${fileName}`);
+    } catch (error) {
+      console.error('Error deleting file from GCS:', error);
+      // Don't throw the error since this is cleanup
     }
   }
 
@@ -50,8 +105,17 @@ class FileTranscriptionService {
   async convertToMono(inputPath) {
     const outputPath = inputPath.replace(/\.[^/.]+$/, '') + '_mono.wav';
     try {
-      // Convert to mono WAV format with 48kHz sample rate
-      await execAsync(`ffmpeg -y -i "${inputPath}" -ac 1 -ar 48000 "${outputPath}"`);
+      // Log original file size
+      const originalSize = fs.statSync(inputPath).size;
+      console.log(`Original file size: ${originalSize} bytes (${(originalSize / 1024 / 1024).toFixed(2)} MB)`);
+      
+      // Convert to mono WAV format with 16kHz sample rate and compression
+      await execAsync(`ffmpeg -y -i "${inputPath}" -ac 1 -ar 16000 -acodec pcm_s16le "${outputPath}"`);
+      
+      // Log converted file size
+      const convertedSize = fs.statSync(outputPath).size;
+      console.log(`Converted file size: ${convertedSize} bytes (${(convertedSize / 1024 / 1024).toFixed(2)} MB)`);
+      
       console.log(`Successfully converted ${inputPath} to mono`);
       return outputPath;
     } catch (error) {
@@ -67,18 +131,19 @@ class FileTranscriptionService {
    * @returns {Promise<object>} Transcription results
    */
   async transcribeFile(filePath, language = 'en-US') {
-    if (!this.speechClient) {
-      throw new Error('Speech client not initialized');
+    if (!this.speechClient || !this.storageClient) {
+      throw new Error('Google clients not initialized');
     }
 
     let monoFilePath = null;
+    let gcsUri = null;
     try {
       // Convert the file to mono WAV format
       monoFilePath = await this.convertToMono(filePath);
       
-      // Read the converted file content
-      const content = fs.readFileSync(monoFilePath);
-      const audio = { content: content.toString('base64') };
+      // Upload to GCS
+      gcsUri = await this.uploadToGCS(monoFilePath);
+      console.log(`File uploaded to GCS: ${gcsUri}`);
 
       // Configure the request
       const config = {
@@ -95,12 +160,17 @@ class FileTranscriptionService {
       console.log('Using transcription config:', JSON.stringify(config, null, 2));
 
       const request = {
-        audio: audio,
+        audio: { uri: gcsUri },
         config: config,
       };
 
-      console.log(`Processing file transcription request for ${monoFilePath}`);
-      const [response] = await this.speechClient.recognize(request);
+      console.log(`Processing file transcription request for ${gcsUri}`);
+      
+      // Start the long-running operation
+      const [operation] = await this.speechClient.longRunningRecognize(request);
+      
+      // Wait for the operation to complete
+      const [response] = await operation.promise();
       
       if (!response.results || response.results.length === 0) {
         console.warn('No transcription results returned from the API');
@@ -128,9 +198,12 @@ class FileTranscriptionService {
         error: error.message,
       };
     } finally {
-      // Clean up the converted mono file
+      // Clean up files
       if (monoFilePath) {
         await this.cleanup(monoFilePath);
+      }
+      if (gcsUri) {
+        await this.deleteFromGCS(gcsUri);
       }
     }
   }
